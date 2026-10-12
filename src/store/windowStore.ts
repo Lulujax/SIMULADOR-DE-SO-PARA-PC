@@ -22,6 +22,10 @@ interface WindowStore {
   openWindow: (pid: number, app: string, size: { width: number; height: number }) => void
   setBounds: (bounds: { width: number; height: number }) => void
   setIconPosition: (key: string, position: { x: number; y: number }) => void
+  clearIconPositions: () => void
+  requestApp: (key: string) => void
+  pendingApp: string | null
+  consumeApp: () => string | null
   closeWindow: (pid: number) => void
   focusWindow: (pid: number) => void
   commitBox: (
@@ -63,9 +67,10 @@ function clampWindow(
   }
 }
 
-export const useWindowStore = create<WindowStore>()((set) => ({
+export const useWindowStore = create<WindowStore>()((set, get) => ({
   windows: {},
   iconPositions: {},
+  pendingApp: null,
   topZ: 10,
   cascade: 0,
   bounds: { width: 1440, height: 900 },
@@ -103,6 +108,16 @@ export const useWindowStore = create<WindowStore>()((set) => ({
         },
       }
     }),
+
+  clearIconPositions: () => set({ iconPositions: {} }),
+
+  requestApp: (key) => set({ pendingApp: key }),
+
+  consumeApp: () => {
+    const key = get().pendingApp
+    if (key) set({ pendingApp: null })
+    return key
+  },
 
   setIconPosition: (key, position) =>
     set((state) => ({
