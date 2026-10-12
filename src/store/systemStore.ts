@@ -1,4 +1,7 @@
 import { create } from "zustand"
+import { setRealVolume } from "@/lib/realHardware"
+import { useSimStore } from "@/store/simStore"
+import { useWindowStore } from "@/store/windowStore"
 
 export type PowerState = "off" | "booting" | "on" | "locked" | "sleeping"
 
@@ -126,6 +129,11 @@ interface SystemState {
 
   setDraft: (pid: number, draft: { name: string; content: string }) => void
 
+  /** Apaga, reinicia o arranca el núcleo desde cero. */
+  startBoot: () => void
+  /** El arranque terminó: el núcleo queda disponible. */
+  finishBoot: () => void
+  /** Atajo del usuario: enciende el equipo (arranque si estaba apagado). */
   powerOn: () => void
   shutdown: () => void
   restart: () => void
@@ -175,16 +183,40 @@ export const useSystemStore = create<SystemState>()((set, get) => ({
   setDraft: (pid, draft) =>
     set((state) => ({ drafts: { ...state.drafts, [pid]: draft } })),
 
+  startBoot: () => {
+    // Volver a arrancar mientras ya arranca no reinicia la barra: se deja
+    // terminar, porque reiniciarla aquí lo dejaría atrapado en bucle.
+    if (get().power === "booting") return
+    set({ recentPower: "apagar", power: "booting", bootProgress: 0 })
+  },
+
+  finishBoot: () => {
+    if (get().power !== "booting") return
+    set({ power: "on", bootProgress: 0 })
+  },
+
   powerOn: () => {
-    if (get().power !== "off") return
-    set({ power: "booting", bootProgress: 0 })
+    const power = get().power
+    if (power === "on" || power === "locked" || power === "sleeping") return
+    if (power === "booting") {
+      // Ya está arrancando: no se toca nada.
+      return
+    }
+    get().startBoot()
   },
 
   shutdown: () => {
+    // Apagar detiene el núcleo: no quedan procesos ni ventanas en memoria.
+    useSimStore.getState().reset()
+    useWindowStore.getState().reset()
     set({ recentPower: "apagar", power: "off", bootProgress: 0 })
   },
 
   restart: () => {
+    // Un reinicio limpia el núcleo antes de volver a arrancarlo, igual que
+    // hace el botón de reinicio del panel de energía.
+    useSimStore.getState().reset()
+    useWindowStore.getState().reset()
     set({ recentPower: "reiniciar", power: "booting", bootProgress: 0 })
   },
 
@@ -202,11 +234,17 @@ export const useSystemStore = create<SystemState>()((set, get) => ({
   },
 
   sleep: () => {
-    if (get().power !== "on") return
+    const power = get().power
+    // Se admite desde «sleeping» para que «volver a suspender» del modo de
+    // suspensión siga teniendo efecto.
+    if (power !== "on" && power !== "sleeping") return
     set({ recentPower: "suspender", power: "sleeping" })
   },
 
-  wake: () => set({ power: "on" }),
+  wake: () => {
+    if (get().power !== "sleeping") return
+    set({ power: "on" })
+  },
   setBootProgress: (value) => set({ bootProgress: value }),
 
   setWallpaper: (id) => {
@@ -219,7 +257,11 @@ export const useSystemStore = create<SystemState>()((set, get) => ({
 
   setIconSize: (iconSize) => set({ iconSize }),
   toggleDesktopIcons: () => set((s) => ({ showDesktopIcons: !s.showDesktopIcons })),
-  setVolume: (volume) => set({ volume }),
+  setVolume: (volume) => {
+    const value = Math.max(0, Math.min(100, Math.round(volume)))
+    set({ volume: value })
+    setRealVolume(value / 100)
+  },
   toggleWifi: () => set((s) => ({ wifi: !s.wifi })),
 
   readDir: (path) => get().fs[path] ?? [],

@@ -4,6 +4,7 @@ import { Maximize2, Minus, X } from "lucide-react"
 import { cn } from "cn"
 import { getApp } from "@/apps/registry"
 import { useWindowStore } from "@/store/windowStore"
+import { useMenuStore } from "@/store/menuStore"
 import { useSimStore } from "@/store/simStore"
 import { useSim } from "@/hooks/useSim"
 import { project, rubberband, velocityFrom, type Sample } from "@/lib/gestures"
@@ -17,7 +18,6 @@ interface Props {
   isFocused: boolean
 }
 
-const TASKBAR_HEIGHT = 64
 const EDGE_SNAP = 12
 
 type SnapHint = "max" | "left" | "right" | null
@@ -30,6 +30,7 @@ export function Window({ pid, bounds, isFocused }: Props) {
   const toggleMaximize = useWindowStore((s) => s.toggleMaximize)
   const commitBox = useWindowStore((s) => s.commitBox)
   const kill = useSimStore((s) => s.kill)
+  const showMenu = useMenuStore((s) => s.show)
 
   const process = useSim((s) => s.processes.find((p) => p.pid === pid))
   const app = process ? getApp(process) : undefined
@@ -45,11 +46,12 @@ export function Window({ pid, bounds, isFocused }: Props) {
   const dragging = useRef(false)
   const [snapHint, setSnapHint] = useState<SnapHint>(null)
 
+  // `bounds` es ya el área útil: el escritorio se la entrega sin la barra.
   const maxBounds = {
     x: 0,
     y: 0,
     width: bounds.width,
-    height: bounds.height - TASKBAR_HEIGHT,
+    height: bounds.height,
   }
 
   useEffect(() => {
@@ -95,8 +97,8 @@ export function Window({ pid, bounds, isFocused }: Props) {
     const nextY = event.clientY - grab.current.dy
 
     // Resistencia progresiva en los bordes en vez de un tope seco.
-    const maxX = bounds.width - 80
-    const maxY = bounds.height - TASKBAR_HEIGHT - TITLE_HEIGHT
+    const maxX = Math.max(0, bounds.width - 80)
+    const maxY = Math.max(0, bounds.height - TITLE_HEIGHT)
     const boundedX =
       nextX < 0
         ? rubberband(nextX, bounds.width)
@@ -139,11 +141,11 @@ export function Window({ pid, bounds, isFocused }: Props) {
     // El objeto hereda la velocidad del dedo y se detiene en la proyección.
     const { vx, vy } = velocityFrom(samples.current)
     const restX = Math.min(
-      bounds.width - 80,
+      Math.max(0, bounds.width - 80),
       Math.max(-bounds.width * 0.1, x.get() + project(vx) * 0.3),
     )
     const restY = Math.min(
-      bounds.height - TASKBAR_HEIGHT,
+      Math.max(0, bounds.height - TITLE_HEIGHT),
       Math.max(-bounds.height * 0.1, y.get() + project(vy) * 0.3),
     )
     animate(x, restX, { type: "spring", bounce: 0.12, duration: 0.45, velocity: vx })
@@ -183,11 +185,12 @@ export function Window({ pid, bounds, isFocused }: Props) {
       {snapHint ? (
         <div
           className={cn(
-            "pointer-events-none absolute z-[1] rounded-xl border-2 border-white/25 bg-white/10 backdrop-blur-sm",
-            snapHint === "max" && "inset-x-3 top-3 bottom-[68px]",
-            snapHint === "left" && "left-3 top-3 bottom-[68px] w-[calc(50%-18px)]",
-            snapHint === "right" && "right-3 top-3 bottom-[68px] w-[calc(50%-18px)]",
+            "pointer-events-none absolute top-3 z-[1] rounded-xl border-2 border-white/25 bg-white/10 backdrop-blur-sm",
+            snapHint === "max" && "inset-x-3",
+            snapHint === "left" && "left-3 w-[calc(50%-18px)]",
+            snapHint === "right" && "right-3 w-[calc(50%-18px)]",
           )}
+          style={{ bottom: bounds.height + 12 }}
         />
       ) : null}
 
@@ -213,6 +216,51 @@ export function Window({ pid, bounds, isFocused }: Props) {
           onDoubleClick={() =>
             toggleMaximize(pid, win.maximized ? (win.restore ?? maxBounds) : maxBounds)
           }
+          onContextMenu={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            showMenu(
+              { clientX: event.clientX, clientY: event.clientY },
+              [
+                {
+                  id: "restaurar",
+                  label: "Restaurar",
+                  disabled: !win.maximized,
+                  onSelect: () => toggleMaximize(pid, win.restore ?? maxBounds),
+                },
+                {
+                  id: "minimizar",
+                  label: "Minimizar",
+                  onSelect: () => minimizeWindow(pid),
+                },
+                {
+                  id: "maximizar",
+                  label: "Maximizar",
+                  disabled: win.maximized,
+                  onSelect: () => toggleMaximize(pid, maxBounds),
+                },
+                { id: "sep", separator: true },
+                {
+                  id: "admin",
+                  label: "Abrir Administrador de tareas",
+                  onSelect: () =>
+                    window.dispatchEvent(
+                      new CustomEvent("so:open-app", { detail: "taskmgr" }),
+                    ),
+                },
+                {
+                  id: "cerrar",
+                  label: "Cerrar y terminar el proceso",
+                  danger: true,
+                  onSelect: () => {
+                    closeWindow(pid)
+                    kill(pid)
+                  },
+                },
+              ],
+              app.title,
+            )
+          }}
           className={cn(
             "flex shrink-0 items-center gap-2 border-b px-2 select-none",
             isFocused

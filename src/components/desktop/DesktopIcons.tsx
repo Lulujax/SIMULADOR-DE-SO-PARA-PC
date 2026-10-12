@@ -7,7 +7,7 @@ import { useMenuStore } from "@/store/menuStore"
 import { useSystemStore } from "@/store/systemStore"
 import { useSimStore } from "@/store/simStore"
 import { useWindowStore } from "@/store/windowStore"
-import { project, rubberband, velocityFrom, type Sample } from "@/lib/gestures"
+import { project, velocityFrom, type Sample } from "@/lib/gestures"
 
 const GRID_X = { pequeno: 84, mediano: 100, grande: 124 }
 const GRID_Y = { pequeno: 76, mediano: 92, grande: 112 }
@@ -21,7 +21,7 @@ interface IconBox {
 }
 
 export function DesktopIcons() {
-  const { launch } = useLauncher()
+  const { launch, launchNew } = useLauncher()
   const iconSize = useSystemStore((s) => s.iconSize)
   const show = useSystemStore((s) => s.showDesktopIcons)
   const showMenu = useMenuStore((s) => s.show)
@@ -44,9 +44,6 @@ export function DesktopIcons() {
     }
   })
 
-  const boxesRef = useRef(boxes)
-  boxesRef.current = boxes
-
   if (!show) return null
 
   return (
@@ -62,10 +59,16 @@ export function DesktopIcons() {
             onCommit={(x, y) => setIconPosition(app.key, { x, y })}
             onMenu={(event) => {
               event.preventDefault()
-              const pid = launch(app.key)
-              const point = { clientX: event.clientX, clientY: event.clientY }
+              event.stopPropagation()
+              // El clic derecho NO abre la aplicación: sólo busca si ya hay
+              // algún proceso suyo para poder ofrecer «Terminar».
+              const running = useSimStore
+                .getState()
+                .sim.processes.find(
+                  (p) => p.app === app.key && p.state !== "terminado",
+                )
               showMenu(
-                point,
+                { clientX: event.clientX, clientY: event.clientY },
                 [
                   {
                     id: "abrir",
@@ -76,17 +79,12 @@ export function DesktopIcons() {
                   {
                     id: "otra",
                     label: "Abrir en una ventana nueva",
-                    onSelect: () => {
-                      const store = useSimStore.getState()
-                      store.reset()
-                      store.commit()
-                    },
-                    disabled: true,
+                    onSelect: () => launchNew(app.key),
                   },
                   { id: "sep1", separator: true },
                   {
                     id: "ocultar",
-                    label: "Quitar del escritorio",
+                    label: "Quitar los iconos del escritorio",
                     onSelect: () => useSystemStore.getState().toggleDesktopIcons(),
                   },
                   {
@@ -97,13 +95,13 @@ export function DesktopIcons() {
                   { id: "sep2", separator: true },
                   {
                     id: "cerrar",
-                    label: "Terminar proceso",
+                    label: running ? `Terminar P${running.pid}` : "Terminar proceso",
                     danger: true,
-                    disabled: pid === null,
+                    disabled: running === undefined,
                     onSelect: () => {
-                      if (pid !== null) {
-                        useSimStore.getState().kill(pid)
-                        useWindowStore.getState().closeWindow(pid)
+                      if (running) {
+                        useSimStore.getState().kill(running.pid)
+                        useWindowStore.getState().closeWindow(running.pid)
                       }
                     },
                   },
@@ -132,6 +130,7 @@ function IconDraggable({ app, box, onOpen, onCommit, onMenu }: IconProps) {
   const samples = useRef<Sample[]>([])
   const grab = useRef({ dx: 0, dy: 0 })
   const dragging = useRef(false)
+  const moved = useRef(false)
 
   useEffect(() => {
     if (dragging.current) return
@@ -141,15 +140,20 @@ function IconDraggable({ app, box, onOpen, onCommit, onMenu }: IconProps) {
 
   function onPointerDown(event: React.PointerEvent<HTMLButtonElement>) {
     if (event.button !== 0) return
+    event.stopPropagation()
     const el = event.currentTarget
     el.setPointerCapture(event.pointerId)
     dragging.current = true
+    moved.current = false
     grab.current = { dx: event.clientX - x.get(), dy: event.clientY - y.get() }
     samples.current = [{ t: performance.now(), x: event.clientX, y: event.clientY }]
   }
 
   function onPointerMove(event: React.PointerEvent<HTMLButtonElement>) {
     if (!dragging.current) return
+    const dx = event.clientX - grab.current.dx - x.get()
+    const dy = event.clientY - grab.current.dy - y.get()
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved.current = true
     x.set(event.clientX - grab.current.dx)
     y.set(event.clientY - grab.current.dy)
     samples.current = [
@@ -161,6 +165,7 @@ function IconDraggable({ app, box, onOpen, onCommit, onMenu }: IconProps) {
   function onPointerUp() {
     if (!dragging.current) return
     dragging.current = false
+    if (!moved.current) return
     const { vx, vy } = velocityFrom(samples.current)
     const restX = Math.max(4, Math.min(window.innerWidth - box.width - 8, x.get() + project(vx) * 0.2))
     const restY = Math.max(4, Math.min(window.innerHeight - 90, y.get() + project(vy) * 0.2))
@@ -172,12 +177,16 @@ function IconDraggable({ app, box, onOpen, onCommit, onMenu }: IconProps) {
   return (
     <motion.button
       type="button"
+      data-icon
       style={{ x, y, width: box.width, height: box.height }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
-      onClick={onOpen}
+      onClick={() => {
+        if (moved.current) return
+        onOpen()
+      }}
       onContextMenu={onMenu}
       title={`${app.title} — clic para abrir, arrastra para mover`}
       className={cn(
@@ -198,7 +207,8 @@ function IconDraggable({ app, box, onOpen, onCommit, onMenu }: IconProps) {
   )
 }
 
-/** Rectángulo de selección por arrastre sobre el escritorio. */
+
+/** Rectangulo de seleccion por arrastre sobre el escritorio. */
 export function Marquee({
   rect,
 }: {
@@ -209,23 +219,8 @@ export function Marquee({
     <div
       aria-hidden
       className="pointer-events-none absolute border border-indigo-500/50 bg-indigo-500/10"
-      style={{
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-      }}
+      style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     />
   )
 }
 
-export function clampToDesktop(
-  value: number,
-  size: number,
-  area: number,
-  slack = 8,
-): number {
-  if (value < 0) return rubberband(value, area)
-  if (value > area - size - slack) return area - size - slack + rubberband(value - (area - size - slack), area)
-  return value
-}

@@ -1,16 +1,22 @@
 import type { LucideIcon } from "lucide-react"
 import {
+  Bomb,
   Calculator,
   Compass,
+  Cpu,
   FolderOpen,
+  GitBranch,
   Globe,
   Image as ImageIcon,
   ListTree,
+  MemoryStick,
+  Network,
   NotebookPen,
   Printer,
   Settings,
   TerminalSquare,
   Video,
+  Workflow,
 } from "lucide-react"
 import type { DeviceKind } from "@/types/os"
 
@@ -31,6 +37,8 @@ export interface AppDefinition {
   minSize: { width: number; height: number }
   background?: boolean
   onDesktop?: boolean
+  /** Se muestra siempre en la barra de tareas, aunque esté cerrada. */
+  pinned?: boolean
 }
 
 export const APPS: AppDefinition[] = [
@@ -285,6 +293,114 @@ export const APPS: AppDefinition[] = [
     minSize: { width: 0, height: 0 },
     background: true,
   },
+  {
+    key: "flow",
+    processName: "kernelview.exe",
+    title: "Flujo del sistema",
+    shortTitle: "Flujo",
+    description:
+      "Diagrama en vivo: interrupción, núcleo, planificador, CPU, memoria y E/S, con el camino que el sistema está recorriendo ahora mismo.",
+    icon: Workflow,
+    accent: "#818cf8",
+    device: null,
+    memoryKB: 16,
+    burst: 300,
+    priority: 8,
+    program: ["LOAD AC, [MAR]", "ADD AC, #1", "INC cont-datos", "HALT"],
+    defaultSize: { width: 900, height: 560 },
+    minSize: { width: 520, height: 360 },
+    pinned: true,
+  },
+  {
+    key: "states",
+    processName: "fsm.exe",
+    title: "Estados y sincronización",
+    shortTitle: "Estados",
+    description:
+      "Máquina de estados de los procesos, historial de transiciones, semáforos y mutex con sus procesos en espera.",
+    icon: GitBranch,
+    accent: "#f472b6",
+    device: null,
+    memoryKB: 14,
+    burst: 320,
+    priority: 8,
+    program: ["LOAD AC, [MAR]", "INC cont-datos", "HALT"],
+    defaultSize: { width: 880, height: 560 },
+    minSize: { width: 520, height: 360 },
+    pinned: true,
+  },
+  {
+    key: "memory",
+    processName: "memsys.exe",
+    title: "Gestor de memoria",
+    shortTitle: "Memoria",
+    description:
+      "Marcos y particiones en vivo, tablas de páginas, fragmentación interna y externa, compactación y zona de swap.",
+    icon: MemoryStick,
+    accent: "#34d399",
+    device: null,
+    memoryKB: 12,
+    burst: 300,
+    priority: 8,
+    program: ["LOAD AC, [MAR]", "ADD AC, #1", "INC cont-datos", "HALT"],
+    defaultSize: { width: 900, height: 580 },
+    minSize: { width: 520, height: 380 },
+    pinned: true,
+  },
+  {
+    key: "hardware",
+    processName: "hwmon.exe",
+    title: "Hardware del equipo",
+    shortTitle: "Hardware",
+    description:
+      "Lee el equipo real: procesador, memoria, disco, batería, red y pantalla. Contrasta el hardware del PC con los periféricos simulados.",
+    icon: Cpu,
+    accent: "#fbbf24",
+    device: null,
+    memoryKB: 10,
+    burst: 260,
+    priority: 7,
+    program: ["IN /dev/disco", "LOAD AC, [MAR]", "INC cont-datos", "HALT"],
+    defaultSize: { width: 860, height: 580 },
+    minSize: { width: 500, height: 380 },
+    pinned: true,
+  },
+  {
+    key: "mines",
+    processName: "mines.exe",
+    title: "Buscaminas",
+    shortTitle: "Buscaminas",
+    description:
+      "Juego completo: tres niveles, banderas, cascada al abrir y contador de minas. Cada jugada consume ciclos de CPU del proceso.",
+    icon: Bomb,
+    accent: "#fb7185",
+    device: null,
+    memoryKB: 12,
+    burst: 400,
+    priority: 6,
+    program: ["LOAD AC, [MAR]", "ADD AC, #1", "STORE AC, [MAR]", "INC cont-datos", "HALT"],
+    defaultSize: { width: 640, height: 600 },
+    minSize: { width: 420, height: 400 },
+    pinned: true,
+  },
+  {
+    key: "network",
+    processName: "netmon.exe",
+    title: "Monitor de red",
+    shortTitle: "Red",
+    description:
+      "Conexión real del navegador junto a la tarjeta de red simulada, con su cola de peticiones E/S.",
+    icon: Network,
+    accent: "#22d3ee",
+    device: "red",
+    memoryKB: 10,
+    burst: 240,
+    priority: 6,
+    program: ["NET /dev/red", "ADD AC, #1", "INC cont-datos", "HALT"],
+    defaultSize: { width: 700, height: 480 },
+    minSize: { width: 420, height: 320 },
+    pinned: true,
+  },
 ]
 
 export const APP_MAP: Record<string, AppDefinition> = Object.fromEntries(
@@ -296,3 +412,6 @@ export function getApp(process: { app: string | null }): AppDefinition | undefin
 }
 
 export const DESKTOP_APPS = APPS.filter((a) => a.onDesktop)
+
+/** Aplicaciones ancladas a la barra de tareas, siempre visibles. */
+export const PINNED_APPS = APPS.filter((a) => a.pinned)

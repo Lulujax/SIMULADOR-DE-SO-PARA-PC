@@ -23,9 +23,6 @@ interface WindowStore {
   setBounds: (bounds: { width: number; height: number }) => void
   setIconPosition: (key: string, position: { x: number; y: number }) => void
   clearIconPositions: () => void
-  requestApp: (key: string) => void
-  pendingApp: string | null
-  consumeApp: () => string | null
   closeWindow: (pid: number) => void
   focusWindow: (pid: number) => void
   commitBox: (
@@ -47,30 +44,33 @@ function clampWindow(
   win: WindowBox,
   bounds: { width: number; height: number },
 ): WindowBox {
-  const maxWidth = Math.min(win.width, Math.max(280, bounds.width - 12))
-  const maxHeight = Math.min(win.height, Math.max(200, bounds.height - 12))
+  // Sólo se encoge si la ventana es de verdad mayor que el área. Antes se
+  // recortaba siempre, y al entrar y salir de pantalla completa las ventanas
+  // encogían sin parar hasta desaparecer.
+  const width = Math.min(win.width, Math.max(280, bounds.width - 12))
+  const height = Math.min(win.height, Math.max(200, bounds.height - 12))
+  const fit = (x: number, y: number, w: number, h: number) => ({
+    width: w,
+    height: h,
+    x: Math.max(6, Math.min(x, Math.max(6, bounds.width - w - 6))),
+    y: Math.max(6, Math.min(y, Math.max(6, bounds.height - h - 6))),
+  })
+  const box = fit(win.x, win.y, width, height)
   return {
     ...win,
-    width: maxWidth,
-    height: maxHeight,
-    x: Math.max(6, Math.min(win.x, bounds.width - maxWidth - 6)),
-    y: Math.max(6, Math.min(win.y, bounds.height - maxHeight - 6)),
+    ...box,
     restore: win.restore
       ? {
           ...win.restore,
-          width: Math.min(win.restore.width, maxWidth),
-          height: Math.min(win.restore.height, maxHeight),
-          x: Math.max(6, Math.min(win.restore.x, bounds.width - maxWidth - 6)),
-          y: Math.max(6, Math.min(win.restore.y, bounds.height - maxHeight - 6)),
+          ...fit(win.restore.x, win.restore.y, win.restore.width, win.restore.height),
         }
       : null,
   }
 }
 
-export const useWindowStore = create<WindowStore>()((set, get) => ({
+export const useWindowStore = create<WindowStore>()((set) => ({
   windows: {},
   iconPositions: {},
-  pendingApp: null,
   topZ: 10,
   cascade: 0,
   bounds: { width: 1440, height: 900 },
@@ -110,14 +110,6 @@ export const useWindowStore = create<WindowStore>()((set, get) => ({
     }),
 
   clearIconPositions: () => set({ iconPositions: {} }),
-
-  requestApp: (key) => set({ pendingApp: key }),
-
-  consumeApp: () => {
-    const key = get().pendingApp
-    if (key) set({ pendingApp: null })
-    return key
-  },
 
   setIconPosition: (key, position) =>
     set((state) => ({

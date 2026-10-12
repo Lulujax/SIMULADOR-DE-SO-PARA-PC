@@ -28,14 +28,20 @@ applyTheme(initialTheme)
 
 interface UiStore {
   theme: ThemeChoice
+  startOpen: boolean
   setTheme: (theme: ThemeChoice) => void
+  setStartOpen: (open: boolean) => void
+  toggleStart: () => void
 }
 
 export const useUiStore = create<UiStore>()((set) => ({
   theme: initialTheme,
+  startOpen: false,
   setTheme: (theme) => {
     applyTheme(theme)
     window.localStorage.setItem(THEME_KEY, theme)
     set({ theme })
   },
+  setStartOpen: (startOpen) => set({ startOpen }),
+  toggleStart: () => set((s) => ({ startOpen: !s.startOpen })),
 }))

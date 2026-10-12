@@ -5,6 +5,7 @@ import { cn } from "cn"
 import { useMenuStore, type MenuItem } from "@/store/menuStore"
 
 const MENU_WIDTH = 232
+const SUBMENU_WIDTH = 212
 
 /**
  * Menú contextual propio del sistema operativo. Se abre siempre dentro de la
@@ -62,7 +63,7 @@ export function ContextMenuLayer() {
           exit={{ opacity: 0, scale: 0.97 }}
           transition={{ type: "spring", bounce: 0, duration: 0.2 }}
           style={{ left: position.left, top: position.top }}
-          className="material-float shadow-float fixed z-[100] w-[232px] origin-top-left overflow-hidden rounded-xl border border-border/70 py-1"
+          className="material-float shadow-float fixed z-[9500] w-[232px] origin-top-left overflow-hidden rounded-xl border border-border/70 py-1"
           onContextMenu={(event) => event.preventDefault()}
         >
           {title ? (
@@ -89,6 +90,8 @@ function MenuRow({
   depth: number
 }) {
   const [subOpen, setSubOpen] = useState(false)
+  const [flipLeft, setFlipLeft] = useState(false)
+  const rowRef = useRef<HTMLDivElement>(null)
   const hasChildren = Boolean(item.children && item.children.length > 0)
 
   if (item.separator) {
@@ -97,8 +100,16 @@ function MenuRow({
 
   return (
     <div
+      ref={rowRef}
       className="relative"
-      onPointerEnter={() => setSubOpen(true)}
+      onPointerEnter={() => {
+        if (!hasChildren) return
+        // Si no cabe a la derecha, el submenú se abre a la izquierda: si no,
+        // opciones como «Ver» quedaban fuera de la pantalla sin poder pulsarse.
+        const box = rowRef.current?.getBoundingClientRect()
+        setFlipLeft(box != null && box.right + SUBMENU_WIDTH + 12 > window.innerWidth)
+        setSubOpen(true)
+      }}
       onPointerLeave={() => setSubOpen(false)}
     >
       <button
@@ -140,10 +151,13 @@ function MenuRow({
 
       {hasChildren && subOpen ? (
         <motion.div
-          initial={{ opacity: 0, x: -4 }}
+          initial={{ opacity: 0, x: flipLeft ? 4 : -4 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ type: "spring", bounce: 0, duration: 0.18 }}
-          className="material-float shadow-float absolute top-0 left-full z-[101] w-[212px] overflow-hidden rounded-xl border border-border/70 py-1"
+          className={cn(
+            "material-float shadow-float absolute top-0 z-[9501] w-[212px] overflow-hidden rounded-xl border border-border/70 py-1",
+            flipLeft ? "right-full" : "left-full",
+          )}
         >
           {item.children!.map((child) => (
             <MenuRow key={child.id} item={child} onClose={onClose} depth={depth + 1} />

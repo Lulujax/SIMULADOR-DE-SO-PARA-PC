@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import {
   Camera as CameraIcon,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  ExternalLink,
   FolderPlus,
   Globe,
   Image as ImageIcon,
@@ -11,6 +15,7 @@ import {
   Pencil,
   Play,
   Printer,
+  RefreshCw,
   Save,
   Settings as SettingsIcon,
   Trash2,
@@ -31,10 +36,19 @@ import {
   useSystemStore,
 } from "@/store/systemStore"
 import { useUiStore } from "@/store/uiStore"
+import { useMenuStore } from "@/store/menuStore"
 import { useErrorStore } from "@/store/errorStore"
 import { stateStyles } from "@/lib/palette"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  FlowDiagram,
+  HardwarePanel,
+  MemoryManager,
+  NetworkMonitor,
+  StatesSync,
+} from "@/apps/SystemApps"
+import { Minesweeper } from "@/apps/Games"
 
 interface Props {
   app: AppDefinition
@@ -65,6 +79,18 @@ export function AppContent({ app, process }: Props) {
       return <TaskManager />
     case "syslog":
       return <SystemLog />
+    case "flow":
+      return <FlowDiagram />
+    case "states":
+      return <StatesSync />
+    case "memory":
+      return <MemoryManager />
+    case "hardware":
+      return <HardwarePanel />
+    case "network":
+      return <NetworkMonitor />
+    case "mines":
+      return <Minesweeper process={process} />
     default:
       return null
   }
@@ -218,46 +244,110 @@ function Notepad({ process }: { process: Process }) {
 
 function Camera({ process }: { process: Process }) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const [denied, setDenied] = useState(false)
+  const [media, setMedia] = useState<MediaStream | null>(null)
+  const [status, setStatus] = useState<"pidiendo" | "viva" | "error">("pidiendo")
+  const [reason, setReason] = useState("")
+  const [deviceName, setDeviceName] = useState("")
   const [shots, setShots] = useState(0)
+  const [attempt, setAttempt] = useState(0)
   const writeFile = useSystemStore((s) => s.writeFile)
   const addWork = useSimStore((s) => s.addWork)
   const images = useSystemStore((s) => s.fs["/Imágenes"] ?? [])
 
+  // 1) Pedir la cámara. Cada intento anterior se libera antes de pedir otra.
   useEffect(() => {
     let cancelled = false
-    async function start() {
-      try {
-        const media = await navigator.mediaDevices.getUserMedia({ video: true })
+    let opened: MediaStream | null = null
+
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      .then((stream) => {
         if (cancelled) {
-          media.getTracks().forEach((t) => t.stop())
+          stream.getTracks().forEach((track) => track.stop())
           return
         }
-        streamRef.current = media
-        if (videoRef.current) {
-          videoRef.current.srcObject = media
-          void videoRef.current.play().catch(() => {})
-        }
-      } catch {
-        if (!cancelled) setDenied(true)
-      }
-    }
-    void start()
+        opened = stream
+        setDeviceName(stream.getVideoTracks()[0]?.label ?? "Cámara")
+        setMedia(stream)
+        setStatus("viva")
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        const name = error instanceof DOMException ? error.name : ""
+        setReason(
+          name === "NotAllowedError" || name === "SecurityError"
+            ? "Permiso denegado. Autoriza la cámara desde el candado de la barra de direcciones y reinténtalo."
+            : name === "NotFoundError" || name === "OverconstrainedError"
+              ? "Este equipo no tiene ninguna cámara conectada."
+              : name === "NotReadableError"
+                ? "Otra aplicación está usando la cámara."
+                : `No se pudo abrir la cámara: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+        )
+        setStatus("error")
+      })
+
     return () => {
       cancelled = true
-      streamRef.current?.getTracks().forEach((t) => t.stop())
+      opened?.getTracks().forEach((track) => track.stop())
     }
-  }, [])
+  }, [attempt])
+
+  // 2) El <video> sólo existe cuando hay estado que lo pinte: se engancha el
+  //    flujo aquí y no dentro de la promesa, para no buscarlo antes de tiempo.
+  useEffect(() => {
+    const element = videoRef.current
+    if (!element || !media) return
+    element.srcObject = media
+    void element.play().catch(() => {})
+  }, [media])
+
+const live = status === "viva" && !!media
+
+  // El estado se limpia en el manejador del clic, no dentro del efecto: así
+  // React no encadena un render extra al montar.
+  const retry = () => {
+    setStatus("pidiendo")
+    setReason("")
+    setDeviceName("")
+    setMedia(null)
+    setAttempt((n) => n + 1)
+  }
+
+  /** Vuelca el fotograma actual a un JPEG dentro del archivo simulado:
+   *  sin esto «Fotos» sólo tenía el nombre del archivo, no la imagen. */
+  const grabFrame = (): string | null => {
+    const video = videoRef.current
+    if (!video || !video.videoWidth) return null
+    try {
+      const canvas = document.createElement("canvas")
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return null
+      // El visor está en espejo; se invierte para guardar la foto derecha.
+      ctx.translate(canvas.width, 0)
+      ctx.scale(-1, 1)
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      return canvas.toDataURL("image/jpeg", 0.82)
+    } catch {
+      return null
+    }
+  }
 
   const capture = () => {
     const now = new Date()
     const stamp = `${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`
+    const frame = grabFrame()
     writeFile("/Imágenes", {
       name: `CAP_${stamp}.jpg`,
       kind: "imagen",
-      content: streamRef.current ? "captura" : "escena-simulada",
-      size: 160_000 + Math.floor(Math.random() * 120_000),
+      content: frame ?? "escena-simulada",
+      size: frame ? Math.round((frame.length * 3) / 4) : 160_000,
       app: "camera",
     })
     setShots((n) => n + 1)
@@ -268,20 +358,50 @@ function Camera({ process }: { process: Process }) {
     <div className="flex h-full flex-col">
       <StateStrip process={process} />
       <div className="relative min-h-0 flex-1 bg-neutral-950">
-        {denied ? (
-          <SimulatedScene />
-        ) : streamRef.current ? (
-          <video ref={videoRef} autoPlay playsInline muted className="size-full object-cover" />
+        {live ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="size-full scale-x-[-1] object-cover"
+          />
         ) : (
-          <div className="grid size-full place-items-center text-neutral-600">
-            <Loader2 className="size-5 animate-spin" />
-          </div>
+          <CameraPlaceholder status={status} reason={reason} />
         )}
 
+        {status === "error" ? (
+          <div className="absolute inset-x-3 bottom-20 flex justify-center">
+            <button
+              type="button"
+              onClick={retry}
+              className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-[0.68rem] font-medium text-neutral-900 transition-colors hover:bg-white"
+            >
+              <RefreshCw className="size-3.5" />
+              Reintentar
+            </button>
+          </div>
+        ) : null}
+
         <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-black/55 px-2 py-1 text-[0.62rem] text-white">
-          <span className="size-1.5 animate-pulse rounded-full bg-rose-500" />
-          {denied ? "ESCENA SIMULADA" : "EN DIRECTO"}
+          <span
+            className={cn(
+              "size-1.5 rounded-full",
+              live
+                ? "animate-pulse bg-rose-500"
+                : status === "pidiendo"
+                  ? "bg-amber-400"
+                  : "bg-neutral-500",
+            )}
+          />
+          {live ? "EN DIRECTO" : status === "pidiendo" ? "ABRIENDO CÁMARA…" : "SIN CÁMARA"}
         </div>
+
+        {deviceName ? (
+          <div className="absolute top-2 right-2 max-w-[45%] truncate rounded-full bg-black/55 px-2 py-1 text-[0.6rem] text-white/80">
+            {deviceName}
+          </div>
+        ) : null}
 
         <div className="absolute inset-x-0 bottom-3 flex justify-center">
           <motion.button
@@ -305,7 +425,13 @@ function Camera({ process }: { process: Process }) {
   )
 }
 
-function SimulatedScene() {
+function CameraPlaceholder({
+  status,
+  reason,
+}: {
+  status: "pidiendo" | "viva" | "error"
+  reason: string
+}) {
   return (
     <div className="relative size-full overflow-hidden bg-gradient-to-br from-slate-800 via-slate-700 to-slate-900">
       <motion.div
@@ -318,12 +444,16 @@ function SimulatedScene() {
           backgroundSize: "200% 200%",
         }}
       />
-      <div className="absolute inset-0 grid place-items-center">
-        <VideoOff className="size-8 text-white/25" />
+      <div className="absolute inset-0 grid place-items-center px-6">
+        {status === "pidiendo" ? (
+          <Loader2 className="size-6 animate-spin text-white/40" />
+        ) : (
+          <div className="text-center">
+            <VideoOff className="mx-auto size-8 text-white/30" />
+            <p className="mt-2 text-[0.7rem] leading-snug text-white/60">{reason}</p>
+          </div>
+        )}
       </div>
-      <p className="absolute inset-x-0 bottom-2 text-center text-[0.62rem] text-white/50">
-        Sin cámara disponible: se simula el visor
-      </p>
     </div>
   )
 }
@@ -358,6 +488,8 @@ const CALC_KEYS: CalcKey[] = [
 
 function CalculatorWindow({ process }: { process: Process }) {
   const [pending, setPending] = useState<{ op: CalcOp; left: number } | null>(null)
+  // Tras pulsar un operador, el siguiente dígito empieza un número nuevo.
+  const [fresh, setFresh] = useState(true)
   const ac = process.registers.ac
 
   function setAc(value: number) {
@@ -384,22 +516,25 @@ function CalculatorWindow({ process }: { process: Process }) {
     const { label, kind } = key
 
     if (kind === "digit") {
-      setAc(Number(`${ac === 0 ? "" : ac}${label}`))
-      setPending(null)
+      setAc(fresh ? Number(label) : Number(`${ac === 0 ? "" : ac}${label}`))
+      setFresh(false)
       return
     }
 
     if (label === "C") {
       setAc(0)
       setPending(null)
+      setFresh(true)
       return
     }
     if (label === "±") {
       setAc(-ac)
+      setFresh(false)
       return
     }
     if (label === "%") {
       setAc(Math.trunc(ac / 100))
+      setFresh(true)
       return
     }
     if (label === "=") {
@@ -407,17 +542,19 @@ function CalculatorWindow({ process }: { process: Process }) {
         setAc(compute(pending.op, pending.left, ac))
         setPending(null)
       }
+      setFresh(true)
       return
     }
 
     const op = label as CalcOp
-    if (pending) {
+    if (pending && !fresh) {
       const result = compute(pending.op, pending.left, ac)
       setAc(result)
       setPending({ op, left: result })
     } else {
       setPending({ op, left: ac })
     }
+    setFresh(true)
   }
 
   return (
@@ -470,16 +607,25 @@ function CalculatorWindow({ process }: { process: Process }) {
 /* Explorador de archivos                                              */
 /* ------------------------------------------------------------------ */
 
+/** Une ruta y nombre sin duplicar la barra: «/» + «Documentos» es
+ *  «/Documentos», no «//Documentos» (que no existía y salía vacía). */
+function joinPath(path: string, name: string): string {
+  if (path === "/" || path === "") return `/${name}`
+  return `${path.replace(/\/+$/, "")}/${name}`
+}
+
 function ExplorerWindow({ process }: { process: Process }) {
   const disk = useSim((s) => s.devices.find((d) => d.kind === "disco"))
   const fs = useSystemStore((s) => s.fs)
   const makeFolder = useSystemStore((s) => s.makeFolder)
   const deleteFile = useSystemStore((s) => s.deleteFile)
   const moveFile = useSystemStore((s) => s.moveFile)
+  const renameFile = useSystemStore((s) => s.renameFile)
+  const showMenu = useMenuStore((s) => s.show)
   const setDraft = useSystemStore((s) => s.setDraft)
   const addWork = useSimStore((s) => s.addWork)
   const { launch } = useLauncher()
-  
+
   const [path, setPath] = useState("/")
   const [dragging, setDragging] = useState<string | null>(null)
   const [overTarget, setOverTarget] = useState<string | null>(null)
@@ -489,7 +635,7 @@ function ExplorerWindow({ process }: { process: Process }) {
 
   function open(name: string, kind: string) {
     if (kind === "carpeta") {
-      setPath(`${path}/${name}`)
+      setPath(joinPath(path, name))
       addWork(process.pid, 4)
       return
     }
@@ -501,6 +647,94 @@ function ExplorerWindow({ process }: { process: Process }) {
     } else if (file.kind === "imagen") {
       launch("photos")
     }
+  }
+
+  /** La carpeta «Documentos» existe como /Documentos, no como /Documentos/. */
+  const goUp = () => {
+    if (path === "/") return
+    const parts = path.split("/").filter(Boolean)
+    parts.pop()
+    setPath(parts.length === 0 ? "/" : `/${parts.join("/")}`)
+    addWork(process.pid, 2)
+  }
+
+  /** Botón derecho sobre un archivo: antes no enseñaba nada. */
+  function fileMenu(event: React.MouseEvent, file: (typeof entries)[number]) {
+    event.preventDefault()
+    event.stopPropagation()
+    showMenu(
+      { clientX: event.clientX, clientY: event.clientY },
+      [
+        {
+          id: "abrir",
+          label: "Abrir",
+          onSelect: () => open(file.name, file.kind),
+        },
+        {
+          id: "abrir-con",
+          label: "Abrir en una ventana nueva",
+          onSelect: () => {
+            if (file.kind === "carpeta") launch("explorer")
+            else if (file.kind === "imagen") launch("photos")
+            else launch("notepad")
+          },
+        },
+        { id: "sep-a", separator: true },
+        {
+          id: "renombrar",
+          label: "Renombrar",
+          disabled: file.kind === "carpeta",
+          onSelect: () => {
+            const next = window.prompt("Nuevo nombre", file.name)
+            if (next?.trim()) {
+              renameFile(path, file.id, next.trim())
+              addWork(process.pid, 2)
+            }
+          },
+        },
+        {
+          id: "mover",
+          label: "Mover a…",
+          children: FOLDERS.filter((f) => f !== path).map((folder) => ({
+            id: `mv-${folder}`,
+            label: folderName(folder),
+            onSelect: () => {
+              moveFile(path, file.id, folder)
+              addWork(process.pid, 3)
+            },
+          })),
+        },
+        { id: "sep-b", separator: true },
+        {
+          id: "propiedades",
+          label: "Propiedades",
+          children: [
+            { id: "p1", label: `Nombre: ${file.name}`, disabled: true },
+            { id: "p2", label: `Tipo: ${file.kind}`, disabled: true },
+            {
+              id: "p3",
+              label: `Tamaño: ${(file.size / 1024).toFixed(1)} KB`,
+              disabled: true,
+            },
+            {
+              id: "p4",
+              label: `Creado: ${new Date(file.createdAt).toLocaleString("es-ES")}`,
+              disabled: true,
+            },
+          ],
+        },
+        {
+          id: "borrar",
+          label: "Eliminar",
+          danger: true,
+          onSelect: () => {
+            deleteFile(path, file.id)
+            addWork(process.pid, 3)
+          },
+        },
+      ],
+      file.name,
+    )
   }
 
   function createFolder() {
@@ -516,6 +750,9 @@ function ExplorerWindow({ process }: { process: Process }) {
       <StateStrip process={process} device={disk} />
 
       <div className="flex items-center gap-1.5 overflow-x-auto border-b border-border/60 px-2 py-1.5">
+        <Button size="icon-xs" variant="ghost" onClick={goUp} aria-label="Subir" disabled={path === "/"}>
+          <ChevronUp className="size-3.5" />
+        </Button>
         <Button
           size="icon-xs"
           variant="ghost"
@@ -595,10 +832,7 @@ function ExplorerWindow({ process }: { process: Process }) {
                 onDragStart={() => setDragging(file.id)}
                 onDragEnd={() => setDragging(null)}
                 onDoubleClick={() => open(file.name, file.kind)}
-                onContextMenu={(event) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                }}
+                onContextMenu={(event) => fileMenu(event, file)}
                 className={cn(
                   "flex flex-col items-center gap-1 rounded-lg border p-2 text-center transition-colors",
                   dragging === file.id
@@ -610,7 +844,7 @@ function ExplorerWindow({ process }: { process: Process }) {
                   {file.kind === "carpeta" ? (
                     <FolderOpenIcon />
                   ) : file.kind === "imagen" ? (
-                    <ImageIcon className="size-7 text-yellow-500" />
+                    <Thumb src={file.content} name={file.name} />
                   ) : (
                     <Pencil className="size-7 text-sky-400" />
                   )}
@@ -689,6 +923,21 @@ function ExplorerWindow({ process }: { process: Process }) {
   )
 }
 
+/** Una imagen guardada guarda su contenido como data URL; si no lo tiene,
+ *  se dibuja el icono de archivo para que quede claro que no es una foto. */
+function Thumb({ src, name }: { src: string; name: string }) {
+  if (src?.startsWith("data:image")) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        className="size-7 rounded object-cover ring-1 ring-yellow-500/40"
+      />
+    )
+  }
+  return <ImageIcon className="size-7 text-yellow-500" />
+}
+
 function FolderOpenIcon() {
   return (
     <svg viewBox="0 0 32 32" className="size-7 text-amber-500" fill="currentColor">
@@ -702,84 +951,224 @@ function FolderOpenIcon() {
 /* Navegador                                                           */
 /* ------------------------------------------------------------------ */
 
+/** Sitios que los marcadores ofrecen: Google abre con ?igu=1, su modo de
+ *  incrustación, que es el único que permite meterlo en un iframe. */
+const HOME_URL = "https://www.google.com/webhp?igu=1"
+
+const BOOKMARKS: { label: string; url: string }[] = [
+  { label: "Google", url: HOME_URL },
+  { label: "Buscar en Google", url: "https://www.google.com/search?igu=1&q=simulador+de+sistema+operativo" },
+  { label: "Wikipedia: SO", url: "https://es.wikipedia.org/wiki/Sistema_operativo" },
+  { label: "Wikipedia: memoria", url: "https://es.wikipedia.org/wiki/Gesti%C3%B3n_de_memoria" },
+  { label: "Wikipedia: planif.", url: "https://es.wikipedia.org/wiki/Planificaci%C3%B3n_de_CPU" },
+  { label: "MDN Web Docs", url: "https://developer.mozilla.org/es/" },
+  { label: "Ejemplo", url: "https://example.com" },
+]
+
+/** Dominios que prohíben expressly el embed: el iframe saldría en blanco. */
+const NO_EMBED = [
+  "bing.com",
+  "duckduckgo.com",
+  "startpage.com",
+  "facebook.com",
+  "instagram.com",
+  "x.com",
+  "twitter.com",
+  "linkedin.com",
+  "youtube.com",
+]
+
+function normalizeTarget(raw: string): string {
+  const text = raw.trim()
+  if (!text) return HOME_URL
+  if (/^https?:\/\//i.test(text)) return text
+  // Sin esquema se asume una búsqueda, que es lo que espera la gente.
+  if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(text)) return `https://${text}`
+  return `https://www.google.com/search?igu=1&q=${encodeURIComponent(text)}`
+}
+
 function BrowserWindow({ process }: { process: Process }) {
   const net = useSim((s) => s.devices.find((d) => d.kind === "red"))
   const addWork = useSimStore((s) => s.addWork)
-  const [url, setUrl] = useState("https://sistemas.university.edu")
-  const [busy, setBusy] = useState(false)
+  const [draft, setDraft] = useState(HOME_URL)
+  const [url, setUrl] = useState(HOME_URL)
+  const [history, setHistory] = useState<string[]>([HOME_URL])
+  const [cursor, setCursor] = useState(0)
+  const [loadKey, setLoadKey] = useState(0)
   const [loaded, setLoaded] = useState(0)
 
-  function navigate() {
-    if (!alive(process)) return
-    setBusy(true)
+  const blocked = NO_EMBED.some((domain) => url.includes(domain))
+  const ready = alive(process)
+
+  function navigate(raw: string) {
+    if (!ready) return
+    const target = normalizeTarget(raw)
+    setUrl(target)
+    setDraft(target)
+    setHistory((h) => [...h.slice(0, cursor + 1), target])
+    setCursor((c) => c + 1)
+    setLoadKey((k) => k + 1)
+    // Cada navegación es una petición real a la tarjeta de red simulada:
+    // el proceso se bloquea en la cola mientras la página baja.
     setLoaded(0)
-    addWork(process.pid, 10)
+    addWork(process.pid, 12)
     let step = 0
     const id = window.setInterval(() => {
-      step += 22 + Math.random() * 24
+      step += 24 + Math.random() * 26
       setLoaded(Math.min(100, step))
-      if (step >= 100) {
-        window.clearInterval(id)
-        setBusy(false)
-      }
-    }, 260)
+      if (step >= 100) window.clearInterval(id)
+    }, 240)
+  }
+
+  const go = (delta: number) => {
+    const next = cursor + delta
+    if (next < 0 || next >= history.length) return
+    setCursor(next)
+    setUrl(history[next])
+    setDraft(history[next])
+    setLoadKey((k) => k + 1)
+    addWork(process.pid, 6)
   }
 
   return (
     <div className="flex h-full flex-col">
       <StateStrip process={process} device={net} />
-      <div className="flex items-center gap-2 border-b border-border/60 px-2 py-1.5">
-        <Input
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          onKeyDown={(event) => event.key === "Enter" && navigate()}
-          className="h-7 font-mono text-[0.7rem]"
-          aria-label="Dirección"
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          className="shrink-0"
-          onClick={navigate}
-          disabled={!alive(process)}
+
+      <div className="flex items-center gap-1.5 border-b border-border/60 px-2 py-1.5">
+        <button
+          type="button"
+          aria-label="Atrás"
+          title="Atrás"
+          disabled={cursor === 0 || !ready}
+          onClick={() => go(-1)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07] disabled:opacity-30"
         >
-          {busy ? (
+          <ChevronLeft className="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Adelante"
+          title="Adelante"
+          disabled={cursor >= history.length - 1 || !ready}
+          onClick={() => go(1)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07] disabled:opacity-30"
+        >
+          <ChevronRight className="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Recargar"
+          title="Recargar"
+          disabled={!ready}
+          onClick={() => navigate(url)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07] disabled:opacity-30"
+        >
+          {loaded < 100 ? (
             <Loader2 className="size-3.5 animate-spin" />
           ) : (
-            <Globe className="size-3.5" />
+            <RefreshCw className="size-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          aria-label="Inicio"
+          title="Ir a Google"
+          onClick={() => navigate(HOME_URL)}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07]"
+        >
+          <Globe className="size-3.5" />
+        </button>
+
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") navigate(draft)
+          }}
+          placeholder="Escribe una dirección o lo que quieras buscar"
+          className="h-7 flex-1 font-mono text-[0.7rem]"
+          aria-label="Dirección o búsqueda"
+        />
+
+        <button
+          type="button"
+          aria-label="Abrir en una pestaña nueva"
+          title="Abrir en una pestaña nueva"
+          onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.07]"
+        >
+          <ExternalLink className="size-3.5" />
+        </button>
+        <Button size="sm" variant="secondary" className="shrink-0" onClick={() => navigate(draft)} disabled={!ready}>
           Ir
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        <div className="h-1.5 overflow-hidden rounded-full bg-border">
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/60 px-2 py-1">
+        {BOOKMARKS.map((mark) => (
+          <button
+            key={mark.url}
+            type="button"
+            onClick={() => navigate(mark.url)}
+            className={cn(
+              "shrink-0 rounded-md border px-2 py-0.5 text-[0.62rem] transition-colors",
+              url === mark.url
+                ? "border-cyan-500/50 bg-cyan-500/12 text-cyan-600 dark:text-cyan-300"
+                : "border-border/60 text-muted-foreground hover:bg-foreground/[0.07]",
+            )}
+          >
+            {mark.label}
+          </button>
+        ))}
+      </div>
+
+      {loaded < 100 ? (
+        <div className="h-1 shrink-0 overflow-hidden rounded-full bg-border/60">
           <motion.div
             className="h-full rounded-full bg-cyan-500"
             animate={{ width: `${loaded}%` }}
-            transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+            transition={{ type: "spring", bounce: 0, duration: 0.35 }}
           />
         </div>
-        {loaded > 10 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <h3 className="mt-4 text-[0.95rem] font-semibold">
-              Sistemas Operativos: planificación y memoria
-            </h3>
-            {[100, 62, 78, 45, 88, 30, 70].map((width, index) => (
-              <motion.div
-                key={index}
-                className="mt-1.5 h-2 rounded bg-muted"
-                initial={{ width: 0 }}
-                animate={{ width: loaded > index * 12 ? `${width}%` : 0 }}
-                transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-              />
-            ))}
-            <p className="mt-4 text-[0.74rem] leading-relaxed text-muted-foreground">
-              Cada recurso pasa por la cola de la tarjeta de red. Mientras espera, el
-              proceso queda bloqueado y la CPU atiende a otro.
-            </p>
-          </motion.div>
-        ) : null}
+      ) : null}
+
+      {blocked ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[0.66rem] text-amber-700 dark:text-amber-300">
+          <span className="min-w-0 flex-1">
+            Este sitio prohíbe mostrarse dentro de otra aplicación, así que el marco
+            quedará en blanco.
+          </span>
+          <button
+            type="button"
+            onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+            className="shrink-0 rounded-md border border-amber-500/40 px-2 py-0.5"
+          >
+            Abrir en pestaña
+          </button>
+        </div>
+      ) : null}
+
+      <div className="relative min-h-0 flex-1 bg-white">
+        {ready ? (
+          <iframe
+            key={loadKey}
+            src={url}
+            title="Navegador"
+            className="size-full border-0"
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+            onLoad={() => setLoaded(100)}
+          />
+        ) : (
+          <div className="grid size-full place-items-center bg-neutral-100 text-neutral-500">
+            <p className="text-[0.75rem]">El proceso terminó: la navegación se cortó.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2 border-t border-border/60 px-2 py-1 text-[0.62rem] text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate font-mono">{url}</span>
+        <span className="shrink-0">Cada página pasa por la cola de la tarjeta de red.</span>
       </div>
     </div>
   )
@@ -928,15 +1317,23 @@ function PhotosApp() {
               key={current?.id}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="grid aspect-[4/3] w-full max-w-md place-items-center rounded-lg bg-gradient-to-br from-slate-700 to-slate-900"
+              className="grid aspect-[4/3] w-full max-w-md place-items-center overflow-hidden rounded-lg bg-gradient-to-br from-slate-700 to-slate-900"
             >
-              <div className="text-center text-slate-300">
-                <CameraIcon className="mx-auto size-8" />
-                <p className="mt-2 font-mono text-[0.72rem]">{current?.name}</p>
-                <p className="text-[0.66rem] opacity-70">
-                  {((current?.size ?? 0) / 1024).toFixed(0)} KB
-                </p>
-              </div>
+              {current?.content?.startsWith("data:image") ? (
+                <img
+                  src={current.content}
+                  alt={current.name}
+                  className="size-full object-contain"
+                />
+              ) : (
+                <div className="text-center text-slate-300">
+                  <CameraIcon className="mx-auto size-8" />
+                  <p className="mt-2 font-mono text-[0.72rem]">{current?.name}</p>
+                  <p className="text-[0.66rem] opacity-70">
+                    {((current?.size ?? 0) / 1024).toFixed(0)} KB
+                  </p>
+                </div>
+              )}
             </motion.div>
           </div>
           <div className="flex items-center gap-1 overflow-x-auto border-t border-border/60 p-1.5">
@@ -952,7 +1349,7 @@ function PhotosApp() {
                 )}
                 aria-label={image.name}
               >
-                <CameraIcon className="size-4 text-muted-foreground" />
+                <Thumb src={image.content} name={image.name} />
               </button>
             ))}
           </div>
@@ -1028,11 +1425,12 @@ let lineSeq = 0
 function TerminalWindow({ process }: { process: Process }) {
   const sim = useSim((s) => s)
   const { launch } = useLauncher()
-  const cwdRef = useRef("/")
+  const [cwd, setCwd] = useState("/")
   const [lines, setLines] = useState<Line[]>([
     { id: ++lineSeq, text: "Simulador del Sistema Operativo 1.0 — escribe `help`" },
   ])
   const [input, setInput] = useState("")
+  const inputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1049,7 +1447,6 @@ function TerminalWindow({ process }: { process: Process }) {
 
     const [cmd, ...args] = line.split(/\s+/)
     const sys = useSystemStore.getState()
-    const cwd = cwdRef.current
 
     switch (cmd) {
       case "help":
@@ -1068,7 +1465,7 @@ function TerminalWindow({ process }: { process: Process }) {
         const target = args[0] === "/" ? "/" : `${cwd}/${args[0] ?? ""}`
         if (sys.fs[target] === undefined) push(`cd: ${args[0]}: no existe`, "error")
         else {
-          cwdRef.current = target
+          setCwd(target)
           push(`Ahora en ${target}`, "ok")
         }
         break
@@ -1134,7 +1531,8 @@ function TerminalWindow({ process }: { process: Process }) {
       case "power":
         if (args[0] === "off") sys.shutdown()
         else if (args[0] === "on") sys.powerOn()
-        else push("power: usa on|off", "error")
+        else if (args[0] === "restart") sys.restart()
+        else push("power: usa on|off|restart", "error")
         break
       case "neofetch":
         push(`  ${sys.user.name}@${sys.user.host}`)
@@ -1156,36 +1554,43 @@ function TerminalWindow({ process }: { process: Process }) {
   }
 
   return (
-    <div className="flex h-full flex-col bg-neutral-950">
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5 text-[0.64rem] text-neutral-400">
-        <span
-          className="size-1.5 rounded-full"
-          style={{ background: stateStyles[process.state].hex }}
-        />
-        {process.pid}@simulador — {cwdRef.current}
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3 font-mono text-[0.72rem] leading-relaxed">
-        {lines.map((line) => (
-          <p
-            key={line.id}
-            className={cn(
-              "whitespace-pre-wrap break-words",
-              line.tone === "error"
-                ? "text-rose-400"
-                : line.tone === "ok"
-                  ? "text-emerald-400"
-                  : line.tone === "info"
-                    ? "text-neutral-400"
-                    : "text-neutral-200",
-            )}
-          >
-            {line.text}
-          </p>
-        ))}
-        <div className="flex items-center gap-1.5 text-emerald-300">
-          <span className="shrink-0">{cwdRef.current} &gt;</span>
-          <input
-            value={input}
+    <div
+        className="flex h-full flex-col bg-neutral-950"
+        // Sin esto el campo no cogía el foco y las pulsaciones acababan en los
+        // atajos globales («r» reiniciaba y cerraba las ventanas del escritorio).
+        onPointerDown={() => inputRef.current?.focus()}
+      >
+        <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5 text-[0.64rem] text-neutral-400">
+          <span
+            className="size-1.5 rounded-full"
+            style={{ background: stateStyles[process.state].hex }}
+          />
+          {process.pid}@simulador - {cwd}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 font-mono text-[0.72rem] leading-relaxed">
+          {lines.map((line) => (
+            <p
+              key={line.id}
+              className={cn(
+                "whitespace-pre-wrap break-words",
+                line.tone === "error"
+                  ? "text-rose-400"
+                  : line.tone === "ok"
+                    ? "text-emerald-400"
+                    : line.tone === "info"
+                      ? "text-neutral-400"
+                      : "text-neutral-200",
+              )}
+            >
+              {line.text}
+            </p>
+          ))}
+          <div className="flex items-center gap-1.5 text-emerald-300">
+            <span className="shrink-0">{cwd} &gt;</span>
+            <input
+              ref={inputRef}
+              autoFocus
+              value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {

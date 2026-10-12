@@ -22,11 +22,20 @@ export function StartMenu({ open, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (open) {
-      setSearch("")
-      window.setTimeout(() => inputRef.current?.focus(), 60)
+    if (!open) return
+    const id = window.setTimeout(() => inputRef.current?.focus(), 60)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        onClose()
+      }
     }
-  }, [open])
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.clearTimeout(id)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [open, onClose])
 
   const counts: Record<string, number> = {}
   for (const p of processes) {
@@ -173,26 +182,3 @@ export function StartMenu({ open, onClose }: Props) {
     </AnimatePresence>
   )
 }
-
-export function useStartMenuHotkey(open: boolean, setOpen: (v: boolean) => void) {
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-      ) {
-        return
-      }
-      if (event.key === "Meta" || event.key === "OS") {
-        event.preventDefault()
-        setOpen(!open)
-      }
-      if (event.key === "Escape" && open) setOpen(false)
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [open, setOpen])
-}
-
-export const startMenuClasses = cn

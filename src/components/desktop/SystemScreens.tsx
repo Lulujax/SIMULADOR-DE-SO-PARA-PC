@@ -20,25 +20,33 @@ export function SystemScreens() {
 
 function BootScreen() {
   const bootProgress = useSystemStore((s) => s.bootProgress)
-  const powerOn = useSystemStore((s) => s.powerOn)
+  const finishBoot = useSystemStore((s) => s.finishBoot)
   const restart = useSystemStore((s) => s.restart)
+  const shutdown = useSystemStore((s) => s.shutdown)
   const setBootProgress = useSystemStore((s) => s.setBootProgress)
 
   useEffect(() => {
     if (bootProgress >= 1) {
-      const id = window.setTimeout(() => powerOn(), 420)
+      const id = window.setTimeout(() => finishBoot(), 420)
       return () => window.clearTimeout(id)
     }
-    const step = 0.04 + Math.random() * 0.09
+    const step = 0.06 + Math.random() * 0.14
     const id = window.setTimeout(
       () => setBootProgress(Math.min(1, bootProgress + step)),
       90 + Math.random() * 160,
     )
     return () => window.clearTimeout(id)
-  }, [bootProgress, powerOn, setBootProgress])
+  }, [bootProgress, finishBoot, setBootProgress])
+
+  // Red de seguridad: si por lo que sea la barra dejara de avanzar, el
+  // equipo arranca igual en vez de quedarse en «Iniciando» para siempre.
+  useEffect(() => {
+    const id = window.setTimeout(() => finishBoot(), 12000)
+    return () => window.clearTimeout(id)
+  }, [finishBoot])
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-neutral-950 text-neutral-100">
+    <div className="fixed inset-0 z-[9800] flex flex-col items-center justify-center bg-neutral-950 text-neutral-100">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -63,13 +71,20 @@ function BootScreen() {
         </div>
       </motion.div>
 
-      <div className="absolute inset-x-0 bottom-8 flex justify-center">
+      <div className="absolute inset-x-0 bottom-8 flex justify-center gap-6">
         <button
           type="button"
           onClick={restart}
           className="text-[0.68rem] text-neutral-600 transition-colors hover:text-neutral-400"
         >
           Reiniciar
+        </button>
+        <button
+          type="button"
+          onClick={shutdown}
+          className="text-[0.68rem] text-neutral-600 transition-colors hover:text-neutral-400"
+        >
+          Apagar
         </button>
       </div>
     </div>
@@ -83,7 +98,7 @@ function ShutdownScreen() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-6 bg-neutral-950 text-neutral-100"
+      className="fixed inset-0 z-[9800] flex flex-col items-center justify-center gap-6 bg-neutral-950 text-neutral-100"
       onDoubleClick={powerOn}
     >
       <motion.div
@@ -117,7 +132,7 @@ function SleepScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       onDoubleClick={wake}
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-100"
+      className="fixed inset-0 z-[9800] flex flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-100"
     >
       <Moon className="size-8 text-neutral-600" />
       <p className="text-sm text-neutral-500">En suspensión</p>
@@ -152,7 +167,7 @@ function LockScreen() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35 }}
-      className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 px-6 text-slate-100"
+      className="fixed inset-0 z-[9800] flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-slate-800 via-slate-900 to-slate-950 px-6 text-slate-100"
       onClick={() => setError(false)}
     >
       <motion.div
