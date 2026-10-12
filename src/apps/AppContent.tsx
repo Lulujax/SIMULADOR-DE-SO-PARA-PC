@@ -250,6 +250,9 @@ function Camera({ process }: { process: Process }) {
   const [deviceName, setDeviceName] = useState("")
   const [shots, setShots] = useState(0)
   const [attempt, setAttempt] = useState(0)
+  // Un MediaStream puede abrirse sin haber llegado aún ningún fotograma: sin
+  // esperar a «loadeddata» el disparador guardaba un archivo sin imagen.
+  const [frameReady, setFrameReady] = useState(false)
   const writeFile = useSystemStore((s) => s.writeFile)
   const addWork = useSimStore((s) => s.addWork)
   const images = useSystemStore((s) => s.fs["/Imágenes"] ?? [])
@@ -297,16 +300,33 @@ function Camera({ process }: { process: Process }) {
     }
   }, [attempt])
 
-  // 2) El <video> sólo existe cuando hay estado que lo pinte: se engancha el
+// 2) El <video> sólo existe cuando hay estado que lo pinte: se engancha el
   //    flujo aquí y no dentro de la promesa, para no buscarlo antes de tiempo.
   useEffect(() => {
     const element = videoRef.current
     if (!element || !media) return
-    element.srcObject = media
-    void element.play().catch(() => {})
+    const attach = () => {
+      element.srcObject = media
+      void element.play().catch(() => {})
+    }
+    const ready = () => setFrameReady(true)
+    attach()
+    // Si todavía no llegó el primer fotograma, se reintenta al llegar.
+    element.addEventListener("loadeddata", attach)
+    element.addEventListener("playing", ready)
+    element.addEventListener("timeupdate", ready)
+    // Respaldo: si el controlador no dispara ninguno de esos eventos, no se
+    // puede dejar el visor con «Abriendo cámara…» para siempre.
+    const fallback = window.setTimeout(ready, 1500)
+    return () => {
+      element.removeEventListener("loadeddata", attach)
+      element.removeEventListener("playing", ready)
+      element.removeEventListener("timeupdate", ready)
+      window.clearTimeout(fallback)
+    }
   }, [media])
 
-const live = status === "viva" && !!media
+  const live = status === "viva" && !!media && frameReady
 
   // El estado se limpia en el manejador del clic, no dentro del efecto: así
   // React no encadena un render extra al montar.
@@ -314,6 +334,7 @@ const live = status === "viva" && !!media
     setStatus("pidiendo")
     setReason("")
     setDeviceName("")
+    setFrameReady(false)
     setMedia(null)
     setAttempt((n) => n + 1)
   }
@@ -322,11 +343,17 @@ const live = status === "viva" && !!media
    *  sin esto «Fotos» sólo tenía el nombre del archivo, no la imagen. */
   const grabFrame = (): string | null => {
     const video = videoRef.current
-    if (!video || !video.videoWidth) return null
+    if (!video) return null
+    // Hay cámaras que abren el flujo sin entregar aún el primer fotograma:
+    // se usan las medidas del propio track y, si tampoco las hay, unas
+    // razonables. Mejor un JPEG en negro que un archivo sin imagen.
+    const settings = media?.getVideoTracks()[0]?.getSettings()
+    const width = video.videoWidth || settings?.width || 640
+    const height = video.videoHeight || settings?.height || 480
     try {
       const canvas = document.createElement("canvas")
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
+      canvas.width = width
+      canvas.height = height
       const ctx = canvas.getContext("2d")
       if (!ctx) return null
       // El visor está en espejo; se invierte para guardar la foto derecha.
@@ -358,17 +385,27 @@ const live = status === "viva" && !!media
     <div className="flex h-full flex-col">
       <StateStrip process={process} />
       <div className="relative min-h-0 flex-1 bg-neutral-950">
-        {live ? (
+        {media ? (
           <video
             ref={videoRef}
             autoPlay
             playsInline
             muted
-            className="size-full scale-x-[-1] object-cover"
+            onLoadedData={() => setFrameReady(true)}
+            className={cn(
+              "size-full scale-x-[-1] object-cover transition-opacity duration-300",
+              frameReady ? "opacity-100" : "opacity-0",
+            )}
           />
         ) : (
           <CameraPlaceholder status={status} reason={reason} />
         )}
+
+        {media && !frameReady ? (
+          <div className="absolute inset-0 grid place-items-center">
+            <Loader2 className="size-6 animate-spin text-white/40" />
+          </div>
+        ) : null}
 
         {status === "error" ? (
           <div className="absolute inset-x-3 bottom-20 flex justify-center">
@@ -1332,6 +1369,9 @@ function PhotosApp() {
                   <p className="text-[0.66rem] opacity-70">
                     {((current?.size ?? 0) / 1024).toFixed(0)} KB
                   </p>
+                  <p className="mt-1.5 max-w-[30ch] text-[0.62rem] opacity-60">
+                    Tomada sin cámara activa: sólo se guardó el registro del archivo.
+                  </p>
                 </div>
               )}
             </motion.div>
@@ -1432,6 +1472,17 @@ function TerminalWindow({ process }: { process: Process }) {
   const [input, setInput] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Al volver a una terminal que ya estaba abierta hay que devolverle el foco
+  // a mano: `autoFocus` sólo actúa en el montaje.
+  useEffect(() => {
+    const onFocus = (event: Event) => {
+      const detail = (event as CustomEvent<{ pid: number }>).detail
+      if (detail?.pid === process.pid) inputRef.current?.focus()
+    }
+    window.addEventListener("so:window-focus", onFocus)
+    return () => window.removeEventListener("so:window-focus", onFocus)
+  }, [process.pid])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" })

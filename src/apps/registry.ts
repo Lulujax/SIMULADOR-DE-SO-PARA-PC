@@ -379,8 +379,8 @@ export const APPS: AppDefinition[] = [
     burst: 400,
     priority: 6,
     program: ["LOAD AC, [MAR]", "ADD AC, #1", "STORE AC, [MAR]", "INC cont-datos", "HALT"],
-    defaultSize: { width: 640, height: 600 },
-    minSize: { width: 420, height: 400 },
+    defaultSize: { width: 700, height: 520 },
+    minSize: { width: 400, height: 360 },
     pinned: true,
   },
   {

@@ -293,7 +293,7 @@ export function Minesweeper({ process }: { process: Process }) {
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
         <div
-          className="grid w-fit gap-1 rounded-lg bg-neutral-800/60 p-1.5"
+          className="mx-auto grid w-fit gap-1 rounded-lg bg-neutral-800/60 p-1.5"
           style={{ gridTemplateColumns: `repeat(${level.cols}, minmax(0, 1fr))` }}
           role="grid"
           aria-label={`Tablero de ${level.cols} por ${level.rows}`}

@@ -1,4 +1,4 @@
-﻿# Simulador de Sistema Operativo
+# Simulador de Sistema Operativo
 
 Simulador didáctico de un sistema operativo de escritorio. Todo ocurre dentro de un
 escritorio con ventanas, barra de tareas y menú de inicio. **Cada aplicación que
@@ -34,14 +34,25 @@ El menú contextual es propio: el navegador nunca enseña el suyo.
 
 - Botón **Inicio** (o tecla Windows) con buscador de aplicaciones.
 - Controles de simulación: ▶/⏸, avanzar un ciclo (→), reiniciar (R) y velocidad 1×–4×.
-- **Aplicaciones ancladas** siempre visibles: Flujo, Estados, Memoria, Hardware y Red.
-  Un punto de color indica el estado del proceso y una línea inferior marca las que
-  están abiertas. Clic abre o restaura; clic en la activa la minimiza.
+- **Aplicaciones ancladas** siempre visibles: Flujo, Estados, Memoria, Hardware, Red y
+  Buscaminas. Un punto de color indica el estado del proceso y una línea inferior
+  marca las que están abiertas. Clic abre o restaura; clic en la activa la minimiza.
 - Botones de las demás ventanas abiertas: clic para enfocar o minimizar.
 - **Ajustes rápidos** (una sola pieza): red, sonido, bloquear, el **volumen real del
   equipo** y la energía (suspender, reiniciar, apagar).
 - Centro de notificaciones con el reloj y el uso de CPU/RAM.
 - En pantallas estrechas las ancladas se ocultan para que la barra nunca desborde.
+
+## El área de trabajo
+
+La barra de tareas **nunca se tapa**: está por encima de todas las ventanas en el
+orden de dibujado, y el área donde viven las ventanas es siempre la pantalla menos
+sus 64 px. Así, una ventana maximizada llega hasta el borde inferior pero nunca debajo
+de la barra.
+
+Al redimensionar, entrar o salir de pantalla completa, las ventanas se recolocan
+dentro del área visible **sin encogerlas ni perderlas**: sólo se mueven, y únicamente
+se recortan si son más grandes que la pantalla.
 
 ## Hardware real del equipo
 
@@ -117,14 +128,15 @@ de cámara → **Permitir**, y después pulsar Reintentar.
 | Bloc de notas | `notepad.exe` | Teclado | **Escribes de verdad**: cada tecla genera una interrupción de E/S y el proceso se bloquea esperando al controlador. |
 | Calculadora | `calc.exe` | — | **Funciona de verdad** (`+ − × ÷ % ± C`): opera directamente sobre el acumulador AC del proceso, así que ves la ALU. |
 | Cámara | `camera.exe` | — | **Enseña tu webcam en directo** (`getUserMedia`). Muestra el nombre real del dispositivo, y si el permiso se deniega o no hay cámara explica el motivo exacto y ofrece **Reintentar**. Cada disparo guarda un archivo en Imágenes y consume CPU. |
-| Fotos | `photos.exe` | — | Galerie de las capturas. |
-| Explorador de archivos | `explorer.exe` | Disco | Navega, **crea carpetas**, **mueve** archivos (arrastrando o con el botón derecho) y los borra. |
+| Fotos | `photos.exe` | — | Galería de las capturas: **muestra la imagen real** que hizo la cámara, en miniatura y en el visor grande. |
+| Explorador de archivos | `explorer.exe` | Disco | Navega (con botón para subir de carpeta), **crea carpetas**, **mueve** archivos y los borra. Botón derecho completo: abrir, renombrar, mover, propiedades y eliminar. Las imágenes se ven en miniatura. |
 | Terminal | `terminal.exe` | — | Consola con órdenes reales: `help`, `ls`, `cd`, `cat`, `mkdir`, `rm`, `ps`, `kill`, `top`, `open`, `power`, `neofetch`, `echo`, `clear`. |
 | Navegador | `browser.exe` | Red | **Navegador de verdad**: barra de direcciones, atrás/adelante/recargar, marcadores y búsqueda. Arranca en **Google** y admite cualquier URL. |
 | Impresora | `writer.exe` | Impresora | El recurso ancla que más bloquea el sistema. |
 | Configuración | `settings.exe` | — | Fondo, tamaño de iconos, tema e información del sistema. |
 | Administrador de tareas | `taskmgr.exe` | — | Tabla de procesos con CPU, memoria, suspender y terminar. |
 | Registro del sistema | `syslog.exe` | — | Eventos del núcleo **y los errores detectados**, con traza. |
+| Buscaminas | `mines.exe` | — | Juego completo: tres niveles (9×9, 16×16, 22×16), banderas, apertura en cascada, contador de minas y reloj. Cada jugada consume ciclos de CPU. |
 | Servicio | `service.exe` | — | Proceso en segundo plano, sin ventana. |
 
 ### Ventanas internas del sistema

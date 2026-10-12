@@ -55,14 +55,28 @@ export function Window({ pid, bounds, isFocused }: Props) {
   }
 
   useEffect(() => {
-    if (!win || dragging.current || win.minimized) return
-    x.set(win.maximized ? maxBounds.x : win.x)
-    y.set(win.maximized ? maxBounds.y : win.y)
-    width.set(win.maximized ? maxBounds.width : win.width)
-    height.set(win.maximized ? maxBounds.height : win.height)
+    x.set(win?.maximized ? maxBounds.x : (win?.x ?? 0))
+    y.set(win?.maximized ? maxBounds.y : (win?.y ?? 0))
+    width.set(win?.maximized ? maxBounds.width : (win?.width ?? 400))
+    height.set(win?.maximized ? maxBounds.height : (win?.height ?? 300))
     // maxBounds deriva de `bounds`, que cambia sólo al redimensionar la ventana
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [win, x, y, width, height, bounds.width, bounds.height])
+
+  // Aviso a la aplicación de que su ventana acaba de recibir el foco. El
+  // `autoFocus` sólo funciona al montar, así que sin esto una ventana que ya
+  // estaba abierta se quedaba sin foco al volver a ella.
+  useEffect(() => {
+    if (!isFocused || !win) return
+    const id = window.setTimeout(
+      () =>
+        window.dispatchEvent(
+          new CustomEvent("so:window-focus", { detail: { pid, app: win.app } }),
+        ),
+      0,
+    )
+    return () => window.clearTimeout(id)
+  }, [isFocused, pid, win])
 
   const snapTo = (hint: Exclude<SnapHint, null>) => {
     if (hint === "max") {
